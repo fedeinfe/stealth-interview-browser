@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Stealth Interview toolbar</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      height: 100%;
+      display: flex; align-items: center; gap: 6px;
+      /* left padding is set per-platform in JS (macOS needs room for the traffic lights) */
+      padding: 0 10px;
+      background: #1b2430; color: #e6edf3;
+      font: 13px -apple-system, system-ui, "Segoe UI", sans-serif;
+      -webkit-user-select: none; user-select: none;
+      -webkit-app-region: drag; /* the bar doubles as draggable chrome */
+    }
+    .nav { display: flex; gap: 2px; -webkit-app-region: no-drag; }
+    button.icon {
+      width: 30px; height: 30px; border: none; border-radius: 6px;
+      background: transparent; color: #c7d1db; font-size: 16px; line-height: 1; cursor: pointer;
+    }
+    button.icon:hover:not(:disabled) { background: #2b3947; }
+    button.icon:disabled { opacity: 0.3; cursor: default; }
+    form { flex: 1; display: flex; -webkit-app-region: no-drag; }
+    input {
+      flex: 1; height: 30px; padding: 0 12px; border-radius: 8px;
+      border: 1px solid #2f3e4d; background: #0f151c; color: #e6edf3;
+      font-size: 13px; outline: none;
+    }
+    input:focus { border-color: #0a84ff; }
+    button.go {
+      -webkit-app-region: no-drag;
+      height: 30px; margin-left: 6px; padding: 0 14px; border: none; border-radius: 8px;
+      background: #0a84ff; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    button.go:hover { background: #0a74e0; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <button class="icon" id="back" title="Back" disabled>‹</button>
+    <button class="icon" id="fwd" title="Forward" disabled>›</button>
+    <button class="icon" id="reload" title="Reload">⟳</button>
+  </div>
+  <form id="f">
+    <input id="u" type="text" spellcheck="false" autocomplete="off"
+           placeholder="Enter the URL to test (e.g. https://your-webapp.example)">
+  </form>
+  <button class="go" id="go">Go</button>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    // macOS insets the window traffic lights over the toolbar; leave room for them.
+    // Other platforms keep the native frame, so no extra left padding is needed.
+    if (process.platform === 'darwin') { document.body.style.paddingLeft = '82px'; }
+
+    const u = document.getElementById('u');
+    const f = document.getElementById('f');
+    const back = document.getElementById('back');
+    const fwd = document.getElementById('fwd');
+    const reload = document.getElementById('reload');
+
+    let editing = false;
+    u.addEventListener('focus', () => { editing = true; u.select(); });
+    u.addEventListener('blur', () => { editing = false; });
+
+    function go() { ipcRenderer.send('fb:go', u.value); u.blur(); }
+    f.addEventListener('submit', (e) => { e.preventDefault(); go(); });
+    document.getElementById('go').addEventListener('click', go);
+    back.addEventListener('click', () => ipcRenderer.send('fb:back'));
+    fwd.addEventListener('click', () => ipcRenderer.send('fb:forward'));
+    reload.addEventListener('click', () => ipcRenderer.send('fb:reload'));
+
+    // URL + button-state updates coming from the site view.
+    ipcRenderer.on('fb:state', (e, s) => {
+      if (!editing && typeof s.url === 'string') u.value = s.url;
+      back.disabled = !s.canGoBack;
+      fwd.disabled = !s.canGoForward;
+    });
+    ipcRenderer.on('fb:focus-url', () => { u.focus(); u.select(); });
+
+    window.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'l') { e.preventDefault(); u.focus(); u.select(); }
+    });
+  </script>
+</body>
+</html>

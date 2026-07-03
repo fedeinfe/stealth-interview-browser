@@ -134,3 +134,12 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# oh-my-claudecode
+.omc/
+
+# Claude instructions
+CLAUDE.md
+
+# Generated webcam media (large binaries)
+media/*.y4m

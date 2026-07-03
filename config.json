@@ -1,0 +1,15 @@
+{
+  "startUrl": "",
+  "webcamVideo": "media/webcam.y4m",
+  "webcamFallbackCaptureStream": false,
+  "userAgent": "",
+  "realFullscreen": false,
+  "fullscreenMode": "kiosk",
+  "injection": "cdp",
+  "mocks": {
+    "webcam": true,
+    "singleMonitor": true,
+    "fullscreen": true,
+    "alwaysActive": true
+  }
+}

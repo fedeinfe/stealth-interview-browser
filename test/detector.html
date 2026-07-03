@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stealth Interview — Detector</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      font: 15px/1.5 -apple-system, system-ui, "Segoe UI", sans-serif;
+      margin: 0; padding: 24px; background: #0b0f14; color: #e6edf3;
+    }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    p.sub { margin: 0 0 20px; color: #8b98a5; }
+
+    /* --- detector cards --- */
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+    .card { background: #131a22; border: 1px solid #223; border-radius: 12px; padding: 16px; }
+    .card h2 { font-size: 15px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+    .badge { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-left: auto; }
+    .ok  { background: #12341f; color: #4ade80; border: 1px solid #205c34; }
+    .bad { background: #3a1414; color: #f87171; border: 1px solid #7f2323; }
+    .warn{ background: #3a2e12; color: #fbbf24; border: 1px solid #7a5c1b; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    td { padding: 4px 0; vertical-align: top; }
+    td.k { color: #8b98a5; white-space: nowrap; padding-right: 12px; }
+    td.v { color: #e6edf3; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+    video#preview { width: 100%; border-radius: 8px; background: #000; margin-top: 8px; }
+    .hint { margin-top: 20px; color: #8b98a5; font-size: 13px; }
+
+    /* --- per-card controls (only populated inside Stealth Interview) --- */
+    .card-ctrl {
+      margin-top: 14px; padding-top: 12px; border-top: 1px solid #243244;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .card-ctrl:empty { display: none; }
+    .tg { display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; font-size: 14px; }
+    .tg input { width: 16px; height: 16px; accent-color: #0a84ff; cursor: pointer; }
+    .tg.disabled { opacity: .45; cursor: default; }
+    .wc-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    button.btn {
+      height: 32px; padding: 0 14px; border: 1px solid #2f4a63; border-radius: 8px;
+      background: #16324d; color: #dbeafe; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    button.btn:hover:not(:disabled) { background: #1d3f60; }
+    button.btn.primary { background: #0a84ff; border-color: #0a84ff; color: #fff; }
+    button.btn.primary:hover:not(:disabled) { background: #0a74e0; }
+    button.btn.danger { background: #3a1414; border-color: #7f2323; color: #fca5a5; }
+    button.btn:disabled { opacity: .4; cursor: default; }
+    .status { font-size: 13px; color: #8b98a5; }
+    .status:empty { display: none; }
+    .status.err { color: #f87171; }
+    .status.ok { color: #4ade80; }
+    .banner {
+      background: #3a2e12; border: 1px solid #7a5c1b; color: #fbbf24;
+      border-radius: 10px; padding: 10px 12px; font-size: 13px;
+    }
+    .muted { color: #6b7a8a; font-size: 12px; }
+    .muted code { word-break: break-all; }
+    .warn-note { color: #fbbf24; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Stealth Interview</h1>
+  <p class="sub">Probe of the four mocked signals. With every mock active each card should be <b>green</b>. Switch tabs or minimize: the event counters must stay at 0. Each card's controls (inside Stealth Interview) toggle its own mock.</p>
+
+  <div class="grid">
+    <div class="card">
+      <h2>📷 Webcam <span id="b-cam" class="badge warn">…</span></h2>
+      <table id="t-cam"></table>
+      <video id="preview" autoplay playsinline muted></video>
+      <div class="card-ctrl" id="ctrl-cam"></div>
+      <div class="status" id="wcStatus" style="margin-top:8px"></div>
+      <input type="file" id="fileInput" accept="video/*" style="display:none">
+    </div>
+    <div class="card">
+      <h2>🖥️ Monitor <span id="b-mon" class="badge warn">…</span></h2>
+      <table id="t-mon"></table>
+      <div class="card-ctrl" id="ctrl-mon"></div>
+    </div>
+    <div class="card">
+      <h2>⛶ Fullscreen <span id="b-fs" class="badge warn">…</span></h2>
+      <table id="t-fs"></table>
+      <div class="card-ctrl" id="ctrl-fs"></div>
+    </div>
+    <div class="card">
+      <h2>👁️ Visibility / Focus <span id="b-vis" class="badge warn">…</span></h2>
+      <table id="t-vis"></table>
+      <div class="card-ctrl" id="ctrl-vis"></div>
+    </div>
+    <div class="card">
+      <h2>🕵️ Anti-tamper (toString) <span id="b-tamper" class="badge warn">…</span></h2>
+      <table id="t-tamper"></table>
+    </div>
+    <div class="card">
+      <h2>🪪 Identity / User-Agent <span id="b-id" class="badge warn">…</span></h2>
+      <table id="t-id"></table>
+    </div>
+  </div>
+
+  <p class="hint">The JSON summary is printed to the console (and the app stdout) on every update.</p>
+
+  <script>
+  /* ==========================================================================
+   * Per-card controls (only active inside Stealth Interview, via window.stealthInterview)
+   * ======================================================================== */
+  (function () {
+    'use strict';
+    const fb = window.stealthInterview;
+    if (!fb) return; // opened outside the app: cards stay detection-only
+
+    const MOCK_LABELS = {
+      singleMonitor: 'Single-monitor mock',
+      fullscreen: 'Fullscreen mock',
+      alwaysActive: 'Always-active-tab mock',
+      webcam: 'Webcam mock'
+    };
+
+    let state = null;
+    let liveStream = null, recorder = null, chunks = [], recordedBlob = null;
+
+    const wcStatus = document.getElementById('wcStatus');
+    const fileInput = document.getElementById('fileInput');
+
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
+
+    function setStatus(msg, cls) {
+      wcStatus.textContent = msg || '';
+      wcStatus.className = 'status' + (cls ? ' ' + cls : '');
+    }
+
+    function clearCtrl(id) { const el = document.getElementById(id); if (el) el.innerHTML = ''; return el; }
+
+    function toggleEl(labelText, checked, disabled, onChange) {
+      const label = document.createElement('label');
+      label.className = 'tg' + (disabled ? ' disabled' : '');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.checked = !!checked; cb.disabled = !!disabled;
+      cb.addEventListener('change', function () { onChange(cb.checked); });
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(' ' + labelText));
+      return label;
+    }
+
+    function hint(text) {
+      const d = document.createElement('div');
+      d.className = 'muted';
+      d.textContent = text;
+      return d;
+    }
+
+    function warnNote(text) {
+      const d = document.createElement('div');
+      d.className = 'warn-note';
+      d.textContent = text;
+      return d;
+    }
+
+    function btn(text, cls, onClick) {
+      const b = document.createElement('button');
+      b.className = 'btn' + (cls ? ' ' + cls : '');
+      b.textContent = text;
+      b.addEventListener('click', onClick);
+      return b;
+    }
+
+    // Render a simple mock toggle into the given card control container.
+    function renderMockToggle(containerId, key) {
+      const c = clearCtrl(containerId);
+      const disabled = !state.canToggleMocks;
+      c.appendChild(toggleEl(MOCK_LABELS[key], state.mocks[key], disabled, function (v) { fb.setMock(key, v); }));
+      c.appendChild(hint(disabled ? 'Runtime toggle needs "injection":"cdp".' : 'Toggling reloads the page under test.'));
+    }
+
+    function renderFullscreenCtrl() {
+      const c = clearCtrl('ctrl-fs');
+      const disabled = !state.canToggleMocks;
+      c.appendChild(toggleEl(MOCK_LABELS.fullscreen, state.mocks.fullscreen, disabled, function (v) { fb.setMock('fullscreen', v); }));
+      c.appendChild(toggleEl('Real fullscreen window', state.realFullscreen, false, function (v) { fb.setRealFullscreen(v); }));
+      c.appendChild(hint(disabled ? 'Runtime mock toggle needs "injection":"cdp".' : 'Toggling the fullscreen mock reloads the page under test.'));
+    }
+
+    // Webcam card: mock toggle + source (upload / record), or the recording UI in capture mode.
+    function renderWebcamCtrl() {
+      const c = clearCtrl('ctrl-cam');
+
+      if (state.captureMode) {
+        const banner = document.createElement('div');
+        banner.className = 'banner';
+        banner.innerHTML = '🔴 <b>Recording mode.</b> Fake-video flags are off so your <b>real</b> camera is reachable. Record a short clip, then apply it (the app restarts).';
+        c.appendChild(banner);
+
+        const row = document.createElement('div');
+        row.className = 'wc-row';
+        const recBtn = btn('● Record', 'danger', startRec);
+        const stopBtn = btn('■ Stop', '', stopRec); stopBtn.disabled = true;
+        const useBtn = btn('Use recording', 'primary', useRecording); useBtn.disabled = true;
+        const cancelBtn = btn('Cancel', '', function () { setStatus('Restarting…'); stopLive(); fb.exitCaptureMode(); });
+        row.appendChild(recBtn); row.appendChild(stopBtn); row.appendChild(useBtn); row.appendChild(cancelBtn);
+        c.appendChild(row);
+        c.appendChild(warnNote('⚠️ “Use recording” and “Cancel” restart the app. “Record” / “Stop” do not.'));
+        c._recBtn = recBtn; c._stopBtn = stopBtn; c._useBtn = useBtn;
+        ensureCaptureStream();
+        return;
+      }
+
+      // Normal mode.
+      const disabled = !state.canToggleMocks;
+      const webcamRestarts = !state.webcamFallbackCaptureStream;
+      c.appendChild(toggleEl(MOCK_LABELS.webcam, state.mocks.webcam, disabled, function (v) {
+        if (webcamRestarts) setStatus('Restarting to apply the webcam change…');
+        fb.setMock('webcam', v);
+      }));
+
+      const row = document.createElement('div');
+      row.className = 'wc-row';
+      const upload = btn('Upload video…', 'primary', function () { fileInput.click(); });
+      const record = btn('Record from camera', '', function () {
+        setStatus('Restarting to reach your real camera…');
+        fb.enterCaptureMode();
+      });
+      if (!state.hasFfmpeg) { upload.disabled = true; record.disabled = true; }
+      row.appendChild(upload); row.appendChild(record);
+      c.appendChild(row);
+      c.appendChild(warnNote('⚠️ “Record from camera” and applying a clip restart the app' +
+        (webcamRestarts ? ', as does toggling the webcam' : '') + ' (the fake webcam is set at startup).'));
+
+      c.appendChild(hint(state.webcamConfigured
+        ? 'Current clip: ' : 'No custom clip yet — Chromium\'s default test pattern is used.'));
+      if (state.webcamConfigured) {
+        const code = document.createElement('code');
+        code.textContent = state.webcamPath;
+        c.lastChild.appendChild(code);
+      }
+      if (disabled) c.appendChild(hint('Runtime toggle needs "injection":"cdp".'));
+
+      setStatus(state.hasFfmpeg ? '' : 'Video conversion unavailable: ffmpeg-static not found. Run "npm install".',
+        state.hasFfmpeg ? '' : 'err');
+    }
+
+    function stopLive() {
+      if (liveStream) { liveStream.getTracks().forEach(function (t) { t.stop(); }); liveStream = null; }
+      const pv = document.getElementById('preview');
+      if (pv) pv.srcObject = null;
+    }
+
+    // Show the real camera in the card's single #preview element (the same one the recorder
+    // uses), so there is exactly ONE preview instead of a second, duplicate one.
+    async function ensureCaptureStream() {
+      const pv = document.getElementById('preview');
+      const existing = pv && pv.srcObject;
+      if (existing && existing.getVideoTracks().some(function (t) { return t.readyState === 'live'; })) {
+        liveStream = existing;
+        setStatus('Real camera ready. Record a short clip (a few seconds is plenty).');
+        return;
+      }
+      try {
+        liveStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        if (pv) pv.srcObject = liveStream;
+        setStatus('Real camera ready. Record a short clip (a few seconds is plenty).');
+      } catch (e) {
+        setStatus('Could not open the real camera: ' + e.name + ' — ' + e.message, 'err');
+      }
+    }
+
+    function pickMime() {
+      const cands = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+      for (let i = 0; i < cands.length; i++) {
+        if (window.MediaRecorder && MediaRecorder.isTypeSupported(cands[i])) return cands[i];
+      }
+      return '';
+    }
+
+    function startRec() {
+      const pv = document.getElementById('preview');
+      liveStream = (pv && pv.srcObject) || liveStream;
+      if (!liveStream) return;
+      const c = document.getElementById('ctrl-cam');
+      chunks = []; recordedBlob = null;
+      const mime = pickMime();
+      try {
+        recorder = new MediaRecorder(liveStream, mime ? { mimeType: mime } : undefined);
+      } catch (e) { setStatus('MediaRecorder error: ' + e.message, 'err'); return; }
+      recorder.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+      recorder.onstop = function () {
+        recordedBlob = new Blob(chunks, { type: (chunks[0] && chunks[0].type) || 'video/webm' });
+        c._useBtn.disabled = false;
+        setStatus('Recorded ' + (recordedBlob.size / 1024 / 1024).toFixed(1) + ' MB. Click "Use recording" to convert and apply.', 'ok');
+      };
+      recorder.start();
+      c._recBtn.disabled = true; c._stopBtn.disabled = false; c._useBtn.disabled = true;
+      setStatus('Recording…', 'ok');
+    }
+
+    function stopRec() {
+      const c = document.getElementById('ctrl-cam');
+      try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch (e) {}
+      c._recBtn.disabled = false; c._stopBtn.disabled = true;
+    }
+
+    function abToBase64(ab) {
+      const bytes = new Uint8Array(ab);
+      let binary = '';
+      const chunk = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+      }
+      return btoa(binary);
+    }
+
+    async function useRecording() {
+      if (!recordedBlob) return;
+      setStatus('Converting recording to Y4M…');
+      try {
+        const ab = await recordedBlob.arrayBuffer();
+        const b64 = abToBase64(ab);
+        const ext = recordedBlob.type.indexOf('mp4') !== -1 ? 'mp4' : 'webm';
+        const res = await fb.setWebcamFromRecording(b64, ext);
+        if (res && res.ok) {
+          stopLive();
+          setStatus('Done. Restarting to apply the new fake webcam…', 'ok');
+          setTimeout(function () { fb.relaunch(); }, 400);
+        } else {
+          setStatus('Conversion failed: ' + (res && res.error), 'err');
+        }
+      } catch (e) {
+        setStatus('Error: ' + e.message, 'err');
+      }
+    }
+
+    fileInput.addEventListener('change', async function () {
+      const f = fileInput.files && fileInput.files[0];
+      if (!f) return;
+      const p = fb.pathForFile(f);
+      if (!p) { setStatus('Could not resolve the file path.', 'err'); return; }
+      setStatus('Converting "' + f.name + '" to Y4M…');
+      try {
+        const res = await fb.setWebcamFromPath(p);
+        if (res && res.ok) {
+          setStatus('Done. Restart to apply the new fake webcam.', 'ok');
+          const c = document.getElementById('ctrl-cam');
+          if (!document.getElementById('applyBtn')) {
+            const apply = btn('Restart now to apply', 'primary', function () { fb.relaunch(); });
+            apply.id = 'applyBtn';
+            c.appendChild(apply);
+          }
+        } else {
+          setStatus('Conversion failed: ' + (res && res.error), 'err');
+        }
+      } catch (e) {
+        setStatus('Error: ' + e.message, 'err');
+      }
+      fileInput.value = '';
+    });
+
+    function renderControls() {
+      renderMockToggle('ctrl-mon', 'singleMonitor');
+      renderFullscreenCtrl();
+      renderMockToggle('ctrl-vis', 'alwaysActive');
+      renderWebcamCtrl();
+    }
+
+    fb.getState().then(function (s) { state = s; renderControls(); });
+    fb.onState(function (s) { state = s; renderControls(); });
+  })();
+
+  /* ==========================================================================
+   * Signal detector (runs everywhere)
+   * ======================================================================== */
+  (function () {
+    'use strict';
+
+    function row(tbody, k, v) {
+      const tr = document.createElement('tr');
+      const tdk = document.createElement('td'); tdk.className = 'k'; tdk.textContent = k;
+      const tdv = document.createElement('td'); tdv.className = 'v'; tdv.textContent = v;
+      tr.appendChild(tdk); tr.appendChild(tdv); tbody.appendChild(tr);
+    }
+    function setBadge(id, state, text) {
+      const el = document.getElementById(id);
+      el.className = 'badge ' + state;
+      el.textContent = text;
+    }
+    function fill(id, pairs) {
+      const t = document.getElementById(id);
+      t.innerHTML = '';
+      pairs.forEach(function (p) { row(t, p[0], p[1]); });
+    }
+
+    const summary = { webcam: {}, monitor: {}, fullscreen: {}, visibility: {}, antiTamper: {} };
+
+    // Event counters that must NEVER fire with "always-active tab".
+    const evCount = { visibilitychange: 0, blur: 0, pagehide: 0 };
+    ['visibilitychange', 'blur', 'pagehide'].forEach(function (type) {
+      window.addEventListener(type, function () { evCount[type]++; updateVisibility(); }, false);
+      document.addEventListener(type, function () { evCount[type]++; updateVisibility(); }, false);
+    });
+
+    // ---- Monitor -----------------------------------------------------------
+    function updateMonitor() {
+      const isExtended = ('isExtended' in screen) ? screen.isExtended : 'n/a';
+      summary.monitor.isExtended = isExtended;
+      const pairs = [
+        ['screen.isExtended', String(isExtended)],
+        ['screen.width×height', screen.width + '×' + screen.height],
+        ['getScreenDetails()', typeof window.getScreenDetails === 'function' ? 'present' : 'absent']
+      ];
+      const decide = function () {
+        const scr = summary.monitor.screens;
+        // "multi detected" only with hard proof: isExtended true, or a numeric count > 1.
+        // A getScreenDetails error (needs a user gesture) is NOT a failure.
+        const multiDetected = (isExtended === true) || (typeof scr === 'number' && scr > 1);
+        const good = !multiDetected && (isExtended === false);
+        let text;
+        if (multiDetected) text = (isExtended === true) ? 'EXTENDED!' : scr + ' screens';
+        else if (isExtended === false) text = '1 monitor';
+        else text = 'n/a';
+        setBadge('b-mon', good ? 'ok' : (multiDetected ? 'bad' : 'warn'), text);
+        fill('t-mon', pairs.concat(
+          scr !== undefined ? [['screens.length', String(scr)]] : []
+        ));
+      };
+      if (typeof window.getScreenDetails === 'function') {
+        window.getScreenDetails().then(function (d) {
+          summary.monitor.screens = d.screens ? d.screens.length : 'n/a';
+          decide();
+        }).catch(function (e) {
+          summary.monitor.screens = 'error: ' + e.name;
+          decide();
+        });
+      } else {
+        decide();
+      }
+    }
+
+    // ---- Fullscreen --------------------------------------------------------
+    function updateFullscreen() {
+      const fsEl = document.fullscreenElement || document.webkitFullscreenElement || null;
+      const fsEnabled = ('fullscreenEnabled' in document) ? document.fullscreenEnabled : 'n/a';
+      const mm = window.matchMedia('(display-mode: fullscreen)').matches;
+      const innerMatch = (window.innerWidth === screen.width && window.innerHeight === screen.height);
+      const posMatch = (window.screenX === 0 && window.screenY === 0);
+      summary.fullscreen = {
+        element: !!fsEl, enabled: fsEnabled, displayModeFullscreen: mm,
+        inner: window.innerWidth + '×' + window.innerHeight,
+        screen: screen.width + '×' + screen.height,
+        screenXY: window.screenX + ',' + window.screenY,
+        innerMatch: innerMatch, posMatch: posMatch
+      };
+      const good = !!fsEl && mm && innerMatch && posMatch;
+      setBadge('b-fs', good ? 'ok' : 'bad', good ? 'fullscreen' : 'NOT fullscreen');
+      fill('t-fs', [
+        ['document.fullscreenElement', fsEl ? '<' + fsEl.tagName.toLowerCase() + '>' : 'null'],
+        ['document.fullscreenEnabled', String(fsEnabled)],
+        ['matchMedia display-mode:fs', String(mm)],
+        ['inner === screen', String(innerMatch) + ' (' + window.innerWidth + '×' + window.innerHeight + ' / ' + screen.width + '×' + screen.height + ')'],
+        ['screenX,Y === 0,0', String(posMatch) + ' (' + window.screenX + ',' + window.screenY + ')']
+      ]);
+    }
+
+    // ---- Visibility / Focus ------------------------------------------------
+    function updateVisibility() {
+      const vs = document.visibilityState;
+      const hidden = document.hidden;
+      const hasFocus = document.hasFocus();
+      summary.visibility = {
+        visibilityState: vs, hidden: hidden, hasFocus: hasFocus,
+        events: Object.assign({}, evCount)
+      };
+      const good = vs === 'visible' && hidden === false &&
+        evCount.visibilitychange === 0 && evCount.blur === 0 && evCount.pagehide === 0;
+      setBadge('b-vis', good ? 'ok' : 'bad', good ? 'always active' : 'DETECTED');
+      fill('t-vis', [
+        ['document.visibilityState', String(vs)],
+        ['document.hidden', String(hidden)],
+        ['document.hasFocus()', String(hasFocus)],
+        ['visibilitychange events', String(evCount.visibilitychange)],
+        ['blur events', String(evCount.blur)],
+        ['pagehide events', String(evCount.pagehide)]
+      ]);
+    }
+
+    // ---- Anti-tamper (override functions must look native) -----------------
+    function updateTamper() {
+      const rows = [];
+      let anyFail = false, anyChecked = false;
+      summary.antiTamper = {};
+      function chk(label, resolveFn) {
+        let fn;
+        try { fn = resolveFn(); } catch (e) { fn = undefined; }
+        if (typeof fn !== 'function') {
+          rows.push([label, 'n/a (API absent)']);
+          summary.antiTamper[label] = 'absent';
+          return;
+        }
+        anyChecked = true;
+        const native = /\[native code\]/.test(fn.toString());
+        if (!native) anyFail = true;
+        rows.push([label, native ? '[native code] ✓' : 'NOT native ✗']);
+        summary.antiTamper[label] = native;
+      }
+      chk('getScreenDetails', function () { return window.getScreenDetails; });
+      chk('matchMedia', function () { return window.matchMedia; });
+      chk('hasFocus', function () { return document.hasFocus; });
+      chk('getUserMedia', function () { return navigator.mediaDevices && navigator.mediaDevices.getUserMedia; });
+      setBadge('b-tamper', anyFail ? 'bad' : (anyChecked ? 'ok' : 'warn'),
+        anyFail ? 'UNMASKED' : (anyChecked ? 'native' : 'n/a'));
+      fill('t-tamper', rows);
+    }
+
+    // ---- Identity / User-Agent ---------------------------------------------
+    function updateIdentity() {
+      const ua = navigator.userAgent;
+      let brands = [];
+      try {
+        if (navigator.userAgentData && navigator.userAgentData.brands) {
+          brands = navigator.userAgentData.brands.map(function (b) { return b.brand + ' ' + b.version; });
+        }
+      } catch (e) {}
+      const leak = /electron|stealth[-\s]?interview/i;
+      const good = !leak.test(ua) && !leak.test(brands.join(' '));
+      summary.identity = { ua: ua, brands: brands, clean: good };
+      setBadge('b-id', good ? 'ok' : 'bad', good ? 'Chrome' : 'ELECTRON!');
+      fill('t-id', [
+        ['navigator.userAgent', ua],
+        ['userAgentData.brands', brands.length ? brands.join(', ') : '(absent)'],
+        ['no "Electron"/"Stealth Interview"', String(good)]
+      ]);
+    }
+
+    // ---- Webcam ------------------------------------------------------------
+    function updateWebcam() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setBadge('b-cam', 'bad', 'API absent');
+        fill('t-cam', [['mediaDevices', 'unavailable (insecure context?)']]);
+        summary.webcam = { available: false };
+        return;
+      }
+      navigator.mediaDevices.getUserMedia({ video: true }).then(function (stream) {
+        const track = stream.getVideoTracks()[0];
+        document.getElementById('preview').srcObject = stream;
+        const settings = track ? track.getSettings() : {};
+        summary.webcam = {
+          active: true,
+          label: track ? track.label : '(none)',
+          readyState: track ? track.readyState : 'n/a',
+          resolution: (settings.width || '?') + '×' + (settings.height || '?')
+        };
+        setBadge('b-cam', track && track.readyState === 'live' ? 'ok' : 'warn', 'active');
+        fill('t-cam', [
+          ['track.label', track ? (track.label || '(empty)') : '(none)'],
+          ['track.readyState', track ? track.readyState : 'n/a'],
+          ['resolution', summary.webcam.resolution],
+          ['frameRate', String(settings.frameRate || '?')]
+        ]);
+        logSummary();
+      }).catch(function (e) {
+        setBadge('b-cam', 'bad', e.name);
+        fill('t-cam', [['error', e.name + ': ' + e.message]]);
+        summary.webcam = { active: false, error: e.name };
+        logSummary();
+      });
+    }
+
+    function logSummary() {
+      console.log('STEALTH-INTERVIEW-DETECTOR ' + JSON.stringify(summary));
+    }
+
+    function updateAll() {
+      updateMonitor();
+      updateFullscreen();
+      updateVisibility();
+      updateTamper();
+      updateIdentity();
+      logSummary();
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+      updateAll();
+      updateWebcam();
+      // Re-check periodically (to catch events/side-channels over time).
+      setInterval(updateAll, 2000);
+    });
+  })();
+  </script>
+</body>
+</html>
