@@ -1,6 +1,6 @@
 {
   "name": "stealth-interview",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Electron sandbox for security testing: opens a site and feeds it mocked signals (looping webcam, single monitor, fullscreen, always-active tab).",
   "main": "src/main.js",
@@ -25,6 +25,7 @@
   "build": {
     "appId": "com.stealthinterview.app",
     "productName": "Stealth Interview",
+    "copyright": "Copyright © 2026 Stealth Interview",
     "directories": {
       "output": "dist"
     },
@@ -43,6 +44,14 @@
     },
     "win": {
       "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": true
     },
     "linux": {
       "target": "AppImage",
