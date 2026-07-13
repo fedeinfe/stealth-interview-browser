@@ -38,6 +38,15 @@ function buildInjectedSource(config) {
     ua: {
       major: (process.versions.chrome || '130').split('.')[0],
       full: process.versions.chrome || '130.0.0.0'
+    },
+    // SEB (Safe Exam Browser) JavaScript API — exposes window.SafeExamBrowser to the page so LMS
+    // integrations that probe it recognize a SEB session. The raw keys are the 64-char hex Config
+    // Key / Browser Exam Key; the in-page updateKeys() derives the per-URL hash from them.
+    seb: {
+      enabled: !!(config && config.sebMode),
+      version: (config && config.sebVersion) || '3.7',
+      configKey: (config && config.sebConfigKey) || '',
+      browserExamKey: (config && config.sebBrowserExamKey) || ''
     }
   };
 

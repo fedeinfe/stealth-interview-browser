@@ -19,7 +19,7 @@
 // and it would otherwise pollute stdout where we forward the page console.
 process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
 
-const { app, BaseWindow, WebContentsView, session, screen, Menu, ipcMain } = require('electron');
+const { app, BaseWindow, BrowserWindow, WebContentsView, session, screen, Menu, ipcMain, dialog, net } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
@@ -27,6 +27,8 @@ const url = require('url');
 const { buildInjectedSource, PROJECT_ROOT } = require('./inject/build');
 const { loadSettings, saveSettings } = require('./settings');
 const webcam = require('./webcam');
+const sebConfig = require('./seb-config');
+const sebKeys = require('./seb-keys');
 
 const TOOLBAR_H = 46; // address-bar height in px
 const IS_MAC = process.platform === 'darwin';
@@ -58,6 +60,11 @@ const DETECTOR_URL = url.pathToFileURL(path.join(PROJECT_ROOT, 'test', 'detector
 function resolveStartUrl() {
   // In capture mode always show the detector so the user can record.
   if (CAPTURE_MODE) return DETECTOR_URL;
+  // SEB mode: open the exam start URL carried by the loaded .seb config.
+  if (config.sebMode && config.sebStartUrl) {
+    const s = String(config.sebStartUrl).trim();
+    if (s) return /^(https?|file):\/\//i.test(s) ? s : 'https://' + s;
+  }
   const raw = (config.startUrl || '').trim();
   if (raw) {
     if (/^(https?|file):\/\//i.test(raw)) return raw;
@@ -100,13 +107,78 @@ app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
 // The version used is the REAL one of the Chromium bundled in Electron -> consistent with
 // the JS engine (avoids the UA-vs-feature mismatch advanced detectors check).
 // ---------------------------------------------------------------------------
-function chromeUserAgent() {
+function baseUserAgent() {
   if (config.userAgent) return config.userAgent;
   const chrome = process.versions.chrome || '130.0.0.0';
   return 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
     '(KHTML, like Gecko) Chrome/' + chrome + ' Safari/537.36';
 }
-app.userAgentFallback = chromeUserAgent();
+
+// In SEB mode, append the exact identification tokens Safe Exam Browser adds to its user agent
+// (seb-mac SEBBrowserController.m:406) so LMS SEB plugins recognize us. We keep the real Chromium
+// base (SEB on Windows is Chromium-based too) so the JS engine stays consistent with the UA.
+function sebUserAgentSuffix() {
+  const v = String(config.sebVersion || '3.7').trim() || '3.7';
+  return ' SEB/' + v + ' SEB/3.5.4 SEB/3.6 SEB/3.6.1';
+}
+function effectiveUserAgent() {
+  return baseUserAgent() + (config.sebMode ? sebUserAgentSuffix() : '');
+}
+app.userAgentFallback = effectiveUserAgent();
+
+// ---------------------------------------------------------------------------
+// SEB (.seb) launch plumbing — must be registered synchronously (before whenReady) so a
+// cold-start file/URL open is captured. Opening a .seb parses it, derives the keys, persists
+// the SEB state and relaunches so the SEB user-agent/headers/injection apply from startup.
+// ---------------------------------------------------------------------------
+let pendingSeb = null; // { type:'file', path } | { type:'url', url }
+
+// Register the app as the handler for seb:// / sebs:// links (no-op harm if it fails in dev).
+try { app.setAsDefaultProtocolClient('seb'); } catch (e) {}
+try { app.setAsDefaultProtocolClient('sebs'); } catch (e) {}
+
+function sebFromArgv(argv) {
+  for (let i = 1; i < (argv || []).length; i++) {
+    const a = argv[i];
+    if (typeof a !== 'string' || a.startsWith('-')) continue;
+    if (/^sebs?:\/\//i.test(a)) return { type: 'url', url: a };
+    if (/\.seb$/i.test(a)) { try { if (fs.existsSync(a)) return { type: 'file', path: a }; } catch (e) {} }
+  }
+  return null;
+}
+
+// Cold-start sources: an explicit env var, then any .seb path / seb:// URL on the command line.
+if (process.env.STEALTH_INTERVIEW_SEB) {
+  pendingSeb = { type: 'file', path: process.env.STEALTH_INTERVIEW_SEB };
+} else {
+  pendingSeb = sebFromArgv(process.argv);
+}
+
+// macOS delivers file/URL opens through these events (also fire while running).
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  if (app.isReady()) openSebPath(filePath);
+  else pendingSeb = { type: 'file', path: filePath };
+});
+app.on('open-url', (event, openedUrl) => {
+  event.preventDefault();
+  if (app.isReady()) openSebUrl(openedUrl);
+  else pendingSeb = { type: 'url', url: openedUrl };
+});
+
+// Single-instance: on Windows/Linux a second `open .seb` launch arrives here as argv.
+if (!app.requestSingleInstanceLock()) {
+  app.exit(0);
+} else {
+  app.on('second-instance', (event, argv) => {
+    const s = sebFromArgv(argv);
+    if (s) { if (s.type === 'file') openSebPath(s.path); else openSebUrl(s.url); }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized && mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Permissions
@@ -134,6 +206,8 @@ function setupHeaders() {
   const full = process.versions.chrome || '130.0.0.0';
   const brand = '"Chromium";v="' + major + '", "Google Chrome";v="' + major + '", "Not?A_Brand";v="99"';
   const brandFull = '"Chromium";v="' + full + '", "Google Chrome";v="' + full + '", "Not?A_Brand";v="99.0.0.0"';
+  const sebConfigKey = config.sebMode ? String(config.sebConfigKey || '').trim() : '';
+  const sebBEK = config.sebMode ? String(config.sebBrowserExamKey || '').trim() : '';
   session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
     const h = details.requestHeaders;
     Object.keys(h).forEach((k) => {
@@ -141,6 +215,12 @@ function setupHeaders() {
       if (kl === 'sec-ch-ua') h[k] = brand;
       else if (kl === 'sec-ch-ua-full-version-list') h[k] = brandFull;
     });
+    // SEB integrity headers: SHA256(urlWithoutFragment + keyHex), per request URL. Only sent when
+    // we actually have a key (a verified override or a config-derived value) — never a wrong guess.
+    if (details.url && /^https?:/i.test(details.url)) {
+      if (sebBEK) h['X-SafeExamBrowser-RequestHash'] = sebKeys.perUrlHash(details.url, sebBEK);
+      if (sebConfigKey) h['X-SafeExamBrowser-ConfigKeyHash'] = sebKeys.perUrlHash(details.url, sebConfigKey);
+    }
     callback({ requestHeaders: h });
   });
 }
@@ -459,6 +539,138 @@ function focusAddressBar() {
 }
 
 // ---------------------------------------------------------------------------
+// SEB (.seb) open / parse / apply
+// ---------------------------------------------------------------------------
+
+// Modal password prompt for encrypted .seb files. Resolves to the entered string, or null if
+// the user cancels / closes the window.
+function promptSebPassword(message) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (val) => {
+      if (settled) return;
+      settled = true;
+      ipcMain.removeListener('seb:password-result', onResult);
+      try { if (win && !win.isDestroyed()) win.close(); } catch (e) {}
+      resolve(val);
+    };
+    const onResult = (event, val) => done(val);
+    ipcMain.on('seb:password-result', onResult);
+
+    const win = new BrowserWindow({
+      width: 380, height: 200, resizable: false, minimizable: false, maximizable: false,
+      parent: mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined,
+      modal: !!(mainWindow && !mainWindow.isDestroyed()),
+      title: 'SEB Password', backgroundColor: '#1b2029', show: false,
+      webPreferences: { nodeIntegration: true, contextIsolation: false }
+    });
+    win.on('closed', () => done(null));
+    win.loadFile(path.join(__dirname, 'seb-password.html'),
+      { search: 'm=' + encodeURIComponent(message || 'Enter the password:') });
+    win.once('ready-to-show', () => win.show());
+  });
+}
+
+// Parse a .seb buffer, derive the SEB keys, persist the SEB state, then relaunch so the SEB
+// user-agent / headers / injection take effect from process start.
+async function applySebConfig(buffer, extra) {
+  extra = extra || {};
+  let parsed;
+  try {
+    parsed = await sebConfig.parseSebFile(buffer, { promptPassword: promptSebPassword });
+  } catch (e) {
+    const msg = (e && e.message) || String(e);
+    if (!/cancel/i.test(msg)) dialog.showErrorBox('Could not open SEB configuration', msg);
+    return;
+  }
+  if (!parsed.startURL) {
+    dialog.showErrorBox('Invalid SEB configuration', 'The .seb file does not contain a start URL.');
+    return;
+  }
+
+  // Prefer a verified manual key override; otherwise derive from the config (best-effort).
+  let configKey = String(config.sebConfigKey || '').trim();
+  let browserExamKey = String(config.sebBrowserExamKey || '').trim();
+  if (!configKey || !browserExamKey) {
+    try {
+      const k = sebKeys.computeKeys(parsed.settings);
+      if (!configKey) configKey = k.configKey || '';
+      if (!browserExamKey) browserExamKey = k.browserExamKey || '';
+      if (!k.usedDefaults) {
+        console.warn('[stealth-interview] SEB key derivation ran WITHOUT the bundled defaults table ' +
+          '(src/seb-defaults.json) — the Config/Browser-Exam keys are only correct if the .seb already ' +
+          'contains all settings. Verify with scripts/seb-keycheck.js or set sebConfigKey/sebBrowserExamKey.');
+      }
+    } catch (e) {
+      console.error('[stealth-interview] SEB key derivation failed:', e.message);
+    }
+  }
+
+  const patch = {
+    sebMode: true,
+    sebStartUrl: parsed.startURL,
+    sebConfigKey: configKey,
+    sebBrowserExamKey: browserExamKey,
+    sebVersion: String(config.sebVersion || '3.7')
+  };
+  if (extra.sebFile) patch.sebFile = extra.sebFile;
+  saveSettings(patch);
+  setTimeout(relaunchApp, 120);
+}
+
+async function openSebPath(filePath) {
+  let buf;
+  try { buf = fs.readFileSync(filePath); }
+  catch (e) { dialog.showErrorBox('Could not read the .seb file', e.message); return; }
+  await applySebConfig(buf, { sebFile: filePath });
+}
+
+// seb://host/x.seb downloads over http, sebs:// over https (SEB's convention).
+async function openSebUrl(sebUrl) {
+  const httpUrl = sebUrl.replace(/^seb:\/\//i, 'http://').replace(/^sebs:\/\//i, 'https://');
+  try {
+    const buf = await fetchToBuffer(httpUrl);
+    await applySebConfig(buf, {});
+  } catch (e) {
+    dialog.showErrorBox('Could not download the SEB configuration', (e && e.message) || String(e));
+  }
+}
+
+// Minimal GET into a Buffer via Electron net (follows redirects by default).
+function fetchToBuffer(target) {
+  return new Promise((resolve, reject) => {
+    let request;
+    try { request = net.request(target); }
+    catch (e) { reject(e); return; }
+    const chunks = [];
+    const timer = setTimeout(() => { try { request.abort(); } catch (e) {} reject(new Error('Download timed out')); }, 15000);
+    request.on('response', (response) => {
+      if (response.statusCode >= 400) { clearTimeout(timer); reject(new Error('HTTP ' + response.statusCode)); return; }
+      response.on('data', (d) => chunks.push(Buffer.from(d)));
+      response.on('end', () => { clearTimeout(timer); resolve(Buffer.concat(chunks)); });
+      response.on('error', (err) => { clearTimeout(timer); reject(err); });
+    });
+    request.on('error', (err) => { clearTimeout(timer); reject(err); });
+    request.end();
+  });
+}
+
+function promptOpenSeb() {
+  dialog.showOpenDialog(mainWindow || undefined, {
+    title: 'Open SEB Configuration',
+    properties: ['openFile'],
+    filters: [{ name: 'SEB Configuration', extensions: ['seb'] }]
+  }).then((res) => {
+    if (!res.canceled && res.filePaths && res.filePaths[0]) openSebPath(res.filePaths[0]);
+  }).catch(() => {});
+}
+
+function exitSebMode() {
+  saveSettings({ sebMode: false, sebStartUrl: '', sebConfigKey: '', sebBrowserExamKey: '', sebFile: '' });
+  setTimeout(relaunchApp, 120);
+}
+
+// ---------------------------------------------------------------------------
 // Menu
 // ---------------------------------------------------------------------------
 function buildMenu() {
@@ -492,6 +704,20 @@ function buildMenu() {
         { role: 'delete', label: 'Delete' },
         { type: 'separator' },
         { role: 'selectAll', label: 'Select All' }
+      ]
+    },
+    {
+      label: 'SEB',
+      submenu: [
+        { label: 'Open SEB Config…', accelerator: 'CmdOrCtrl+O', click: promptOpenSeb },
+        { type: 'separator' },
+        {
+          label: config.sebMode
+            ? ('SEB mode: ON' + (config.sebStartUrl ? '  —  ' + config.sebStartUrl : ''))
+            : 'SEB mode: off',
+          enabled: false
+        },
+        { label: 'Exit SEB mode', enabled: !!config.sebMode, click: exitSebMode }
       ]
     },
     {
@@ -545,6 +771,17 @@ app.whenReady().then(() => {
   setupHeaders();
   buildMenu();
   createWindow();
+
+  // A .seb was opened at cold start (file association, command line, env var, or seb:// link):
+  // parse it now (may prompt for a password) and relaunch into SEB mode.
+  if (pendingSeb) {
+    const p = pendingSeb;
+    pendingSeb = null;
+    setTimeout(() => {
+      if (p.type === 'file') openSebPath(p.path);
+      else if (p.type === 'url') openSebUrl(p.url);
+    }, 150);
+  }
 
   const exitAfter = parseInt(process.env.STEALTH_INTERVIEW_EXIT_AFTER_MS || '0', 10);
   if (exitAfter > 0) {

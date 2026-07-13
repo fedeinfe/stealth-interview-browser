@@ -24,6 +24,16 @@ const DEFAULTS = {
   realFullscreen: false,
   fullscreenMode: 'kiosk',
   injection: 'cdp',
+  // SEB (Safe Exam Browser) impersonation. sebMode is toggled by opening a .seb file; the derived
+  // values are persisted so the SEB user-agent/headers/injection apply from startup. sebConfigKey /
+  // sebBrowserExamKey are 64-char hex; set them explicitly to override the (best-effort) derivation
+  // with a value verified against the target LMS.
+  sebMode: false,
+  sebVersion: '3.7',
+  sebFile: '',
+  sebStartUrl: '',
+  sebConfigKey: '',
+  sebBrowserExamKey: '',
   mocks: { webcam: true, singleMonitor: true, fullscreen: true, alwaysActive: true }
 };
 
@@ -61,6 +71,12 @@ function normalize(cfg) {
   cfg.webcamFallbackCaptureStream = !!cfg.webcamFallbackCaptureStream;
   cfg.realFullscreen = !!cfg.realFullscreen;
   cfg.userAgent = (cfg.userAgent || '').trim();
+  cfg.sebMode = !!cfg.sebMode;
+  cfg.sebVersion = (cfg.sebVersion || '3.7').toString().trim() || '3.7';
+  cfg.sebFile = (cfg.sebFile || '').toString();
+  cfg.sebStartUrl = (cfg.sebStartUrl || '').toString().trim();
+  cfg.sebConfigKey = (cfg.sebConfigKey || '').toString().trim();
+  cfg.sebBrowserExamKey = (cfg.sebBrowserExamKey || '').toString().trim();
   return cfg;
 }
 

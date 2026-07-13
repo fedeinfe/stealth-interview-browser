@@ -13,6 +13,9 @@ const electron = require('electron'); // resolves to the Electron executable pat
 const env = Object.assign({}, process.env);
 delete env.NODE_OPTIONS;
 
-const child = spawn(electron, ['.'], { stdio: 'inherit', env });
+// Forward extra args (e.g. `npm start -- /path/to/exam.seb`) to Electron so a .seb path or
+// seb:// URL can be opened in dev, where OS file associations don't apply.
+const extra = process.argv.slice(2);
+const child = spawn(electron, ['.', ...extra], { stdio: 'inherit', env });
 child.on('error', (e) => { console.error('Failed to launch Electron:', e.message); process.exit(1); });
 child.on('close', (code) => process.exit(code == null ? 0 : code));

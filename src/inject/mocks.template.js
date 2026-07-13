@@ -278,3 +278,62 @@ if (__CFG__.ua && typeof navigator !== 'undefined' && navigator.userAgentData) {
     replaceMethod(__uadProto, 'getHighEntropyValues', __fakeGHEV, 'getHighEntropyValues');
   } catch (e) {}
 }
+
+/* ============================================================================
+ * (f) SAFE EXAM BROWSER JS API — expose window.SafeExamBrowser for LMS probes.
+ *     Mirrors seb-mac's injected object (SEBAbstractModernWebView.swift:73-89). Keys start
+ *     empty and are filled per-URL when the page calls security.updateKeys(cb), matching SEB.
+ *     Each hash is SHA256(location-without-fragment + rawKeyHex), identical to the request
+ *     headers set in the main process.
+ * ========================================================================== */
+if (__CFG__.seb && __CFG__.seb.enabled && typeof window !== 'undefined') {
+  (function () {
+    var SEB = __CFG__.seb;
+    var appVersion = SEB.version || '3.7';
+
+    var __stripFrag = function (u) { var i = u.indexOf('#'); return i === -1 ? u : u.slice(0, i); };
+    var __sha256hex = function (str) {
+      // Requires SubtleCrypto (present on https / localhost — where exams run).
+      if (!(window.crypto && window.crypto.subtle && window.TextEncoder)) return Promise.resolve('');
+      var bytes = new TextEncoder().encode(str);
+      return window.crypto.subtle.digest('SHA-256', bytes).then(function (buf) {
+        var arr = new Uint8Array(buf), hex = '';
+        for (var i = 0; i < arr.length; i++) hex += arr[i].toString(16).padStart(2, '0');
+        return hex;
+      });
+    };
+
+    var api = {
+      version: appVersion,
+      security: {
+        browserExamKey: '',
+        configKey: '',
+        appVersion: appVersion,
+        updateKeys: function updateKeys(callback) {
+          var target = __stripFrag(location.href);
+          var jobs = [];
+          if (SEB.browserExamKey) {
+            jobs.push(__sha256hex(target + SEB.browserExamKey).then(function (h) { api.security.browserExamKey = h; }));
+          }
+          if (SEB.configKey) {
+            jobs.push(__sha256hex(target + SEB.configKey).then(function (h) { api.security.configKey = h; }));
+          }
+          var invoke = function () {
+            if (typeof callback === 'function') { try { callback(); } catch (e) {} }
+            else if (typeof callback === 'string' && typeof window[callback] === 'function') { try { window[callback](); } catch (e) {} }
+          };
+          Promise.all(jobs).then(invoke, invoke);
+          return true;
+        }
+      }
+    };
+
+    try {
+      Object.defineProperty(window, 'SafeExamBrowser', {
+        value: api, writable: true, configurable: true, enumerable: true
+      });
+    } catch (e) {
+      try { window.SafeExamBrowser = api; } catch (e2) {}
+    }
+  })();
+}

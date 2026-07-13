@@ -6,6 +6,8 @@
   "realFullscreen": false,
   "fullscreenMode": "kiosk",
   "injection": "cdp",
+  "sebMode": false,
+  "sebVersion": "3.7",
   "mocks": {
     "webcam": true,
     "singleMonitor": true,

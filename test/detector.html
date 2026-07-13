@@ -63,7 +63,7 @@
 </head>
 <body>
   <h1>Stealth Interview</h1>
-  <p class="sub">Probe of the four mocked signals. With every mock active each card should be <b>green</b>. Switch tabs or minimize: the event counters must stay at 0. Each card's controls (inside Stealth Interview) toggle its own mock.</p>
+  <p class="sub">Probe of the four mocked signals. With every mock active each card should be <b>green</b>. Switch tabs or minimize: the event counters must stay at 0. Each card's controls (inside Stealth Interview) toggle its own mock. The <b>SEB</b> card lights up when the app is running in Safe Exam Browser mode — the exact signals an LMS/exam platform inspects.</p>
 
   <div class="grid">
     <div class="card">
@@ -96,6 +96,10 @@
     <div class="card">
       <h2>🪪 Identity / User-Agent <span id="b-id" class="badge warn">…</span></h2>
       <table id="t-id"></table>
+    </div>
+    <div class="card">
+      <h2>🎓 Safe Exam Browser <span id="b-seb" class="badge warn">…</span></h2>
+      <table id="t-seb"></table>
     </div>
   </div>
 
@@ -388,7 +392,7 @@
       pairs.forEach(function (p) { row(t, p[0], p[1]); });
     }
 
-    const summary = { webcam: {}, monitor: {}, fullscreen: {}, visibility: {}, antiTamper: {} };
+    const summary = { webcam: {}, monitor: {}, fullscreen: {}, visibility: {}, antiTamper: {}, seb: {} };
 
     // Event counters that must NEVER fire with "always-active tab".
     const evCount = { visibilitychange: 0, blur: 0, pagehide: 0 };
@@ -529,6 +533,54 @@
       ]);
     }
 
+    // ---- Safe Exam Browser -------------------------------------------------
+    // What an LMS/exam platform inspects to decide "is this a genuine SEB session":
+    //   1. window.SafeExamBrowser  (the injected JS API: version + security.{keys,updateKeys})
+    //   2. navigator.userAgent     (the SEB/<version> identification tokens)
+    // The per-URL browserExamKey/configKey are filled in by security.updateKeys(cb), exactly as
+    // SEB does — each is SHA256(location-without-fragment + rawKeyHex), matching the request headers.
+    let sebKeysRequested = false;
+    function updateSeb() {
+      const SEB = window.SafeExamBrowser;
+      const present = !!(SEB && SEB.security && typeof SEB === 'object');
+      const uaTokens = (navigator.userAgent.match(/SEB\/[\d.]+/g) || []);
+      const uaHasSeb = uaTokens.length > 0;
+
+      // Ask the API to compute the per-URL hashes once (async via SubtleCrypto), then re-render.
+      if (present && !sebKeysRequested && typeof SEB.security.updateKeys === 'function') {
+        sebKeysRequested = true;
+        try { SEB.security.updateKeys(function () { updateSeb(); }); } catch (e) {}
+      }
+
+      const bek = present ? (SEB.security.browserExamKey || '') : '';
+      const ck = present ? (SEB.security.configKey || '') : '';
+      const shorten = function (h) { return h ? (h.slice(0, 16) + '…' + h.slice(-8)) : '(empty — updateKeys pending or no key configured)'; };
+
+      summary.seb = {
+        apiPresent: present,
+        version: present ? (SEB.version || '') : null,
+        uaTokens: uaTokens,
+        browserExamKey: bek || null,
+        configKey: ck || null
+      };
+
+      let good, text;
+      if (present && uaHasSeb) { good = true; text = 'SEB active'; }
+      else if (!present && !uaHasSeb) { good = null; text = 'off'; }
+      else { good = false; text = 'partial'; }
+      setBadge('b-seb', good === true ? 'ok' : (good === false ? 'bad' : 'warn'), text);
+
+      fill('t-seb', [
+        ['window.SafeExamBrowser', present ? 'present ✓' : 'absent'],
+        ['SafeExamBrowser.version', present ? String(SEB.version || '(none)') : 'n/a'],
+        ['security.appVersion', present ? String(SEB.security.appVersion || '(none)') : 'n/a'],
+        ['security.updateKeys', present && typeof SEB.security.updateKeys === 'function' ? 'function ✓' : 'n/a'],
+        ['UA SEB tokens', uaHasSeb ? uaTokens.join(' ') : '(none)'],
+        ['security.browserExamKey', present ? shorten(bek) : 'n/a'],
+        ['security.configKey', present ? shorten(ck) : 'n/a']
+      ]);
+    }
+
     // ---- Webcam ------------------------------------------------------------
     function updateWebcam() {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -573,6 +625,7 @@
       updateVisibility();
       updateTamper();
       updateIdentity();
+      updateSeb();
       logSummary();
     }
 

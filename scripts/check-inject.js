@@ -20,10 +20,14 @@ function main() {
     process.exit(1);
   }
 
-  // Test every relevant combination (webcam flag vs. captureStream fallback).
+  // Test every relevant combination (webcam flag vs. captureStream fallback, SEB JS API on).
   const variants = [
     { name: 'default (webcam flag)', override: { webcamFallbackCaptureStream: false } },
-    { name: 'captureStream fallback', override: { webcamFallbackCaptureStream: true } }
+    { name: 'captureStream fallback', override: { webcamFallbackCaptureStream: true } },
+    { name: 'SEB mode (SafeExamBrowser API)', override: {
+      sebMode: true, sebVersion: '3.7',
+      sebConfigKey: 'a'.repeat(64), sebBrowserExamKey: 'b'.repeat(64)
+    } }
   ];
 
   let ok = true;
